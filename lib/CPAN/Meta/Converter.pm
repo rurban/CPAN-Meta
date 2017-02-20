@@ -3,25 +3,25 @@ use strict;
 use warnings;
 package CPAN::Meta::Converter;
 
-our $VERSION = '2.150006';
+our $VERSION = '2.150010';
 
-=head1 SYNOPSIS
-
-  my $struct = decode_json_file('META.json');
-
-  my $cmc = CPAN::Meta::Converter->new( $struct );
-
-  my $new_struct = $cmc->convert( version => "2" );
-
-=head1 DESCRIPTION
-
-This module converts CPAN Meta structures from one form to another.  The
-primary use is to convert older structures to the most modern version of
-the specification, but other transformations may be implemented in the
-future as needed.  (E.g. stripping all custom fields or stripping all
-optional fields.)
-
-=cut
+#pod =head1 SYNOPSIS
+#pod
+#pod   my $struct = decode_json_file('META.json');
+#pod
+#pod   my $cmc = CPAN::Meta::Converter->new( $struct );
+#pod
+#pod   my $new_struct = $cmc->convert( version => "2" );
+#pod
+#pod =head1 DESCRIPTION
+#pod
+#pod This module converts CPAN Meta structures from one form to another.  The
+#pod primary use is to convert older structures to the most modern version of
+#pod the specification, but other transformations may be implemented in the
+#pod future as needed.  (E.g. stripping all custom fields or stripping all
+#pod optional fields.)
+#pod
+#pod =cut
 
 use CPAN::Meta::Validator;
 use CPAN::Meta::Requirements;
@@ -43,22 +43,36 @@ BEGIN {
 # Perl 5.10.0 didn't have "is_qv" in version.pm
 *_is_qv = version->can('is_qv') ? sub { $_[0]->is_qv } : sub { exists $_[0]->{qv} };
 
+# We limit cloning to a maximum depth to bail out on circular data
+# structures.  While actual cycle detection might be technically better,
+# we expect circularity in META data structures to be rare and generally
+# the result of user error.  Therefore, a depth counter is lower overhead.
+our $DCLONE_MAXDEPTH = 1024;
+our $_CLONE_DEPTH;
+
 sub _dclone {
-  my $ref = shift;
+  my ( $ref  ) = @_;
+  return $ref unless my $reftype = ref $ref;
 
-  # if an object is in the data structure and doesn't specify how to
-  # turn itself into JSON, we just stringify the object.  That does the
-  # right thing for typical things that might be there, like version objects,
-  # Path::Class objects, etc.
-  no warnings 'once';
-  no warnings 'redefine';
-  local *UNIVERSAL::TO_JSON = sub { "$_[0]" };
+  local $_CLONE_DEPTH = defined $_CLONE_DEPTH ? $_CLONE_DEPTH - 1 : $DCLONE_MAXDEPTH;
+  die "Depth Limit $DCLONE_MAXDEPTH Exceeded" if $_CLONE_DEPTH == 0;
 
-  my $json = Parse::CPAN::Meta->json_backend()->new
-      ->utf8
-      ->allow_blessed
-      ->convert_blessed;
-  $json->decode($json->encode($ref))
+  return [ map { _dclone( $_ ) } @{$ref} ] if 'ARRAY' eq $reftype;
+  return { map { $_ => _dclone( $ref->{$_} ) } keys %{$ref} } if 'HASH' eq $reftype;
+
+  if ( 'SCALAR' eq $reftype ) {
+    my $new = _dclone(${$ref});
+    return \$new;
+  }
+
+  # We can't know if TO_JSON gives us cloned data, so refs must recurse
+  if ( eval { $ref->can('TO_JSON') } ) {
+    my $data = $ref->TO_JSON;
+    return ref $data ? _dclone( $data ) : $data;
+  }
+
+  # Just stringify everything else
+  return "$ref";
 }
 
 my %known_specs = (
@@ -1302,22 +1316,22 @@ $fragments_generate{$_} = $fragments_generate{'1.4'} for qw/1.3 1.2 1.1 1.0/;
 # Code
 #--------------------------------------------------------------------------#
 
-=method new
-
-  my $cmc = CPAN::Meta::Converter->new( $struct );
-
-The constructor should be passed a valid metadata structure but invalid
-structures are accepted.  If no meta-spec version is provided, version 1.0 will
-be assumed.
-
-Optionally, you can provide a C<default_version> argument after C<$struct>:
-
-  my $cmc = CPAN::Meta::Converter->new( $struct, default_version => "1.4" );
-
-This is only needed when converting a metadata fragment that does not include a
-C<meta-spec> field.
-
-=cut
+#pod =method new
+#pod
+#pod   my $cmc = CPAN::Meta::Converter->new( $struct );
+#pod
+#pod The constructor should be passed a valid metadata structure but invalid
+#pod structures are accepted.  If no meta-spec version is provided, version 1.0 will
+#pod be assumed.
+#pod
+#pod Optionally, you can provide a C<default_version> argument after C<$struct>:
+#pod
+#pod   my $cmc = CPAN::Meta::Converter->new( $struct, default_version => "1.4" );
+#pod
+#pod This is only needed when converting a metadata fragment that does not include a
+#pod C<meta-spec> field.
+#pod
+#pod =cut
 
 sub new {
   my ($class,$data,%args) = @_;
@@ -1352,53 +1366,53 @@ sub _extract_spec_version {
     return( $default || "1.2" ); # when meta-spec was first defined
 }
 
-=method convert
-
-  my $new_struct = $cmc->convert( version => "2" );
-
-Returns a new hash reference with the metadata converted to a different form.
-C<convert> will die if any conversion/standardization still results in an
-invalid structure.
-
-Valid parameters include:
-
-=over
-
-=item *
-
-C<version> -- Indicates the desired specification version (e.g. "1.0", "1.1" ... "1.4", "2").
-Defaults to the latest version of the CPAN Meta Spec.
-
-=back
-
-Conversion proceeds through each version in turn.  For example, a version 1.2
-structure might be converted to 1.3 then 1.4 then finally to version 2. The
-conversion process attempts to clean-up simple errors and standardize data.
-For example, if C<author> is given as a scalar, it will converted to an array
-reference containing the item. (Converting a structure to its own version will
-also clean-up and standardize.)
-
-When data are cleaned and standardized, missing or invalid fields will be
-replaced with sensible defaults when possible.  This may be lossy or imprecise.
-For example, some badly structured META.yml files on CPAN have prerequisite
-modules listed as both keys and values:
-
-  requires => { 'Foo::Bar' => 'Bam::Baz' }
-
-These would be split and each converted to a prerequisite with a minimum
-version of zero.
-
-When some mandatory fields are missing or invalid, the conversion will attempt
-to provide a sensible default or will fill them with a value of 'unknown'.  For
-example a missing or unrecognized C<license> field will result in a C<license>
-field of 'unknown'.  Fields that may get an 'unknown' include:
-
-=for :list
-* abstract
-* author
-* license
-
-=cut
+#pod =method convert
+#pod
+#pod   my $new_struct = $cmc->convert( version => "2" );
+#pod
+#pod Returns a new hash reference with the metadata converted to a different form.
+#pod C<convert> will die if any conversion/standardization still results in an
+#pod invalid structure.
+#pod
+#pod Valid parameters include:
+#pod
+#pod =over
+#pod
+#pod =item *
+#pod
+#pod C<version> -- Indicates the desired specification version (e.g. "1.0", "1.1" ... "1.4", "2").
+#pod Defaults to the latest version of the CPAN Meta Spec.
+#pod
+#pod =back
+#pod
+#pod Conversion proceeds through each version in turn.  For example, a version 1.2
+#pod structure might be converted to 1.3 then 1.4 then finally to version 2. The
+#pod conversion process attempts to clean-up simple errors and standardize data.
+#pod For example, if C<author> is given as a scalar, it will converted to an array
+#pod reference containing the item. (Converting a structure to its own version will
+#pod also clean-up and standardize.)
+#pod
+#pod When data are cleaned and standardized, missing or invalid fields will be
+#pod replaced with sensible defaults when possible.  This may be lossy or imprecise.
+#pod For example, some badly structured META.yml files on CPAN have prerequisite
+#pod modules listed as both keys and values:
+#pod
+#pod   requires => { 'Foo::Bar' => 'Bam::Baz' }
+#pod
+#pod These would be split and each converted to a prerequisite with a minimum
+#pod version of zero.
+#pod
+#pod When some mandatory fields are missing or invalid, the conversion will attempt
+#pod to provide a sensible default or will fill them with a value of 'unknown'.  For
+#pod example a missing or unrecognized C<license> field will result in a C<license>
+#pod field of 'unknown'.  Fields that may get an 'unknown' include:
+#pod
+#pod =for :list
+#pod * abstract
+#pod * author
+#pod * license
+#pod
+#pod =cut
 
 sub convert {
   my ($self, %args) = @_;
@@ -1457,17 +1471,17 @@ sub convert {
   }
 }
 
-=method upgrade_fragment
-
-  my $new_struct = $cmc->upgrade_fragment;
-
-Returns a new hash reference with the metadata converted to the latest version
-of the CPAN Meta Spec.  No validation is done on the result -- you must
-validate after merging fragments into a complete metadata document.
-
-Available since version 2.141170.
-
-=cut
+#pod =method upgrade_fragment
+#pod
+#pod   my $new_struct = $cmc->upgrade_fragment;
+#pod
+#pod Returns a new hash reference with the metadata converted to the latest version
+#pod of the CPAN Meta Spec.  No validation is done on the result -- you must
+#pod validate after merging fragments into a complete metadata document.
+#pod
+#pod Available since version 2.141170.
+#pod
+#pod =cut
 
 sub upgrade_fragment {
   my ($self) = @_;
@@ -1489,7 +1503,117 @@ sub upgrade_fragment {
 
 # ABSTRACT: Convert CPAN distribution metadata structures
 
-__END__
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+CPAN::Meta::Converter - Convert CPAN distribution metadata structures
+
+=head1 VERSION
+
+version 2.150010
+
+=head1 SYNOPSIS
+
+  my $struct = decode_json_file('META.json');
+
+  my $cmc = CPAN::Meta::Converter->new( $struct );
+
+  my $new_struct = $cmc->convert( version => "2" );
+
+=head1 DESCRIPTION
+
+This module converts CPAN Meta structures from one form to another.  The
+primary use is to convert older structures to the most modern version of
+the specification, but other transformations may be implemented in the
+future as needed.  (E.g. stripping all custom fields or stripping all
+optional fields.)
+
+=head1 METHODS
+
+=head2 new
+
+  my $cmc = CPAN::Meta::Converter->new( $struct );
+
+The constructor should be passed a valid metadata structure but invalid
+structures are accepted.  If no meta-spec version is provided, version 1.0 will
+be assumed.
+
+Optionally, you can provide a C<default_version> argument after C<$struct>:
+
+  my $cmc = CPAN::Meta::Converter->new( $struct, default_version => "1.4" );
+
+This is only needed when converting a metadata fragment that does not include a
+C<meta-spec> field.
+
+=head2 convert
+
+  my $new_struct = $cmc->convert( version => "2" );
+
+Returns a new hash reference with the metadata converted to a different form.
+C<convert> will die if any conversion/standardization still results in an
+invalid structure.
+
+Valid parameters include:
+
+=over
+
+=item *
+
+C<version> -- Indicates the desired specification version (e.g. "1.0", "1.1" ... "1.4", "2").
+Defaults to the latest version of the CPAN Meta Spec.
+
+=back
+
+Conversion proceeds through each version in turn.  For example, a version 1.2
+structure might be converted to 1.3 then 1.4 then finally to version 2. The
+conversion process attempts to clean-up simple errors and standardize data.
+For example, if C<author> is given as a scalar, it will converted to an array
+reference containing the item. (Converting a structure to its own version will
+also clean-up and standardize.)
+
+When data are cleaned and standardized, missing or invalid fields will be
+replaced with sensible defaults when possible.  This may be lossy or imprecise.
+For example, some badly structured META.yml files on CPAN have prerequisite
+modules listed as both keys and values:
+
+  requires => { 'Foo::Bar' => 'Bam::Baz' }
+
+These would be split and each converted to a prerequisite with a minimum
+version of zero.
+
+When some mandatory fields are missing or invalid, the conversion will attempt
+to provide a sensible default or will fill them with a value of 'unknown'.  For
+example a missing or unrecognized C<license> field will result in a C<license>
+field of 'unknown'.  Fields that may get an 'unknown' include:
+
+=over 4
+
+=item *
+
+abstract
+
+=item *
+
+author
+
+=item *
+
+license
+
+=back
+
+=head2 upgrade_fragment
+
+  my $new_struct = $cmc->upgrade_fragment;
+
+Returns a new hash reference with the metadata converted to the latest version
+of the CPAN Meta Spec.  No validation is done on the result -- you must
+validate after merging fragments into a complete metadata document.
+
+Available since version 2.141170.
 
 =head1 BUGS
 
@@ -1500,6 +1624,34 @@ L<http://rt.cpan.org/Dist/Display.html?Queue=CPAN-Meta>
 When submitting a bug or request, please include a test-file or a patch to an
 existing test-file that illustrates the bug or desired feature.
 
+=head1 AUTHORS
+
+=over 4
+
+=item *
+
+David Golden <dagolden@cpan.org>
+
+=item *
+
+Ricardo Signes <rjbs@cpan.org>
+
+=item *
+
+Adam Kennedy <adamk@cpan.org>
+
+=back
+
+=head1 COPYRIGHT AND LICENSE
+
+This software is copyright (c) 2010 by David Golden, Ricardo Signes, Adam Kennedy and Contributors.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
+
 =cut
+
+__END__
+
 
 # vim: ts=2 sts=2 sw=2 et :

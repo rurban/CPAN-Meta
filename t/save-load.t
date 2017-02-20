@@ -5,11 +5,11 @@ use Test::More 0.88;
 use CPAN::Meta;
 use File::Temp 0.20 ();
 use Parse::CPAN::Meta 1.4400;
-use Config;
 
-delete $ENV{$_} for qw/PERL_JSON_BACKEND PERL_YAML_BACKEND/; # use defaults
-my $jsonbackend = $Config{usecperl} ? 'Cpanel::JSON::XS' : 'JSON::PP';
-my $yamlbackend = $Config{usecperl} ? 'YAML::XS' : 'CPAN::Meta::YAML';
+delete $ENV{PERL_YAML_BACKEND};
+delete $ENV{PERL_JSON_BACKEND};
+delete $ENV{CPAN_META_JSON_BACKEND};
+delete $ENV{CPAN_META_JSON_DECODER};
 
 my $distmeta = {
   name     => 'Module-Build',
@@ -21,6 +21,7 @@ my $distmeta = {
   author   => [
     'Ken Williams <kwilliams@cpan.org>',
     'Module-Build List <module-build@perl.org>', # additional contact
+    "יובל קוג'מן (Yuval Kogman) <nothingmuch\@woobling.org>",
   ],
   release_status => 'stable',
   license  => [ 'perl_5' ],
@@ -76,7 +77,8 @@ my $distmeta = {
 };
 
 my $meta = CPAN::Meta->new( $distmeta );
-
+my $jbackend = Parse::CPAN::Meta->json_backend();
+my $ybackend = Parse::CPAN::Meta->yaml_backend();
 my $tmpdir = File::Temp->newdir();
 my $metafile = File::Spec->catfile( $tmpdir, 'META.json' );
 
@@ -88,8 +90,8 @@ is($loaded->{name},     'Module-Build', 'name correct');
 
 like(
   $loaded->{x_serialization_backend},
-  qr/\A$jsonbackend version [0-9]/,
-  "x_serialization_backend",
+  qr/\A$jbackend version [0-9]/,
+  "x_serialization_backend $jbackend",
 );
 
 ok(
@@ -113,8 +115,8 @@ is( $loaded->{requires}{perl}, "5.006", 'prereq correct' );
 
 like(
   $loaded->{x_serialization_backend},
-  qr/\A$yamlbackend version [0-9]/,
-  "x_serialization_backend",
+  qr/\A$ybackend version [0-9]/,
+  "x_serialization_backend $ybackend",
 );
 
 ok(

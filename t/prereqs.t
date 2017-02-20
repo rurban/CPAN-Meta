@@ -1,11 +1,13 @@
 use strict;
 use warnings;
 use Test::More 0.88;
-use Config;
 
 use CPAN::Meta::Prereqs;
 
-delete $ENV{$_} for qw/PERL_JSON_BACKEND PERL_YAML_BACKEND/; # use defaults
+delete $ENV{PERL_YAML_BACKEND};
+delete $ENV{PERL_JSON_BACKEND};
+delete $ENV{CPAN_META_JSON_BACKEND};
+delete $ENV{CPAN_META_JSON_DECODER};
 
 my $prereq_struct = {
   runtime => {
@@ -21,6 +23,9 @@ my $prereq_struct = {
       'File::Path' => 0,
       'File::Spec' => 0,
       'IO::File'   => 0,
+      'strict'     => 0,
+      'XSLoader'   => 0,
+      'attributes' => 0,
       'perl'       => '5.005_03',
     },
     recommends => {
@@ -35,13 +40,19 @@ my $prereq_struct = {
     requires => {
       'Test' => 0,
     },
-  }
+    x_type => {
+      'Config' => 1,
+    },
+  },
+  x_phase => {
+    requires => {
+      'JSON::PP' => '2.34',
+    },
+    x_type => {
+      'POSIX' => '1.23',
+    },
+  },
 };
-
-if ($Config{usecperl}) {
-  $prereq_struct->{runtime}->{requires}->{$_} = 0
-    for qw(strict XSLoader attributes);
-}
 
 my $prereq = CPAN::Meta::Prereqs->new($prereq_struct);
 
@@ -52,10 +63,8 @@ is_deeply($prereq->as_string_hash, $prereq_struct, "round-trip okay");
 {
   my $req = $prereq->requirements_for(qw(runtime requires));
   my @req_mod = $req->required_modules;
-  my @test_reqs = ('Cwd');
-  push @test_reqs, qw(strict XSLoader attributes) if $Config{usecperl};
 
-  for my $m (@test_reqs) {
+  for my $m (qw(Cwd strict XSLoader attributes)) {
     ok(
        (grep { $m eq $_ } @req_mod),
        "got the $m runtime requires",
@@ -81,7 +90,7 @@ is_deeply($prereq->as_string_hash, $prereq_struct, "round-trip okay");
 
   my @req_mod = $merged->required_modules;
 
-  for my $m (qw(Cwd)) {
+  for my $m (qw(Cwd strict XSLoader attributes)) {
     ok(
        (grep { $m eq $_ } @req_mod),
        "got the $m runtime requires",

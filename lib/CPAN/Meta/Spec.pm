@@ -8,11 +8,29 @@ use strict;
 use warnings;
 package CPAN::Meta::Spec;
 
-our $VERSION = '2.150006';
+our $VERSION = '2.150010c';
+$VERSION =~ s/c$//;
 
 1;
 
 # ABSTRACT: specification for CPAN distribution metadata
+
+
+# vi:tw=72
+
+__END__
+
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+CPAN::Meta::Spec - specification for CPAN distribution metadata
+
+=head1 VERSION
+
+version 2.150010c
 
 =head1 SYNOPSIS
 
@@ -142,7 +160,8 @@ constraints on the values of a data element.
 =head2 Boolean
 
 A I<Boolean> is used to provide a true or false value.  It B<must> be
-represented as a defined value.
+represented as a defined value that is either "1" or "0" or stringifies
+to those values.
 
 =head2 String
 
@@ -387,9 +406,17 @@ not impact the interpretation of the document.
 
 For the version 2 spec, either of these are recommended:
 
-=for :list
-* C<https://metacpan.org/pod/CPAN::Meta::Spec>
-* C<http://search.cpan.org/perldoc?CPAN::Meta::Spec>
+=over 4
+
+=item *
+
+C<https://metacpan.org/pod/CPAN::Meta::Spec>
+
+=item *
+
+C<http://search.cpan.org/perldoc?CPAN::Meta::Spec>
+
+=back
 
 =back
 
@@ -822,14 +849,18 @@ formats:
 Decimal versions are regular "decimal numbers", with some limitations.
 They B<must> be non-negative and B<must> begin and end with a digit.  A
 single underscore B<may> be included, but B<must> be between two digits.
+A final single 'c' character is permitted to denote a typed perl11/cperl
+variant, which is not yet parsable by perl5.
 They B<must not> use exponential notation ("1.23e-2").
 
    version => '1.234'       # OK
    version => '1.23_04'     # OK
+   version => '1.23_04c'    # OK
 
    version => '1.23_04_05'  # Illegal
    version => '1.'          # Illegal
    version => '.1'          # Illegal
+   version => '1.c2'        # Illegal
 
 =item Dotted-integer versions
 
@@ -842,6 +873,7 @@ three integer components.  To retain a one-to-one mapping with decimal
 versions, all components after the first B<should> be restricted to the
 range 0 to 999.  The final component B<may> be separated by an
 underscore character instead of a period.
+A final single 'c' character is not permitted here yet.
 
    version => 'v1.2.3'      # OK
    version => 'v1.2_3'      # OK
@@ -1098,11 +1130,17 @@ whatsoever to the actual prerequisites of the distribution.
 In practice, however, one can generally expect such prerequisites to be
 one of two things:
 
-=for :list
-* The minimum prerequisites for the distribution, to which dynamic
-  configuration will only add items
-* Whatever the distribution configured with on the releaser's machine
-  at release time
+=over 4
+
+=item *
+
+The minimum prerequisites for the distribution, to which dynamic configuration will only add items
+
+=item *
+
+Whatever the distribution configured with on the releaser's machine at release time
+
+=back
 
 The second case often turns out to have identical results to the first case,
 albeit only by accident.
@@ -1131,15 +1169,45 @@ indexing anything in the first place - just use that.
 
 =head1 SEE ALSO
 
-=for :list
-* CPAN, L<http://www.cpan.org/>
-* JSON, L<http://json.org/>
-* YAML, L<http://www.yaml.org/>
-* L<CPAN>
-* L<CPANPLUS>
-* L<ExtUtils::MakeMaker>
-* L<Module::Build>
-* L<Module::Install>
+=over 4
+
+=item *
+
+CPAN, L<http://www.cpan.org/>
+
+=item *
+
+JSON, L<http://json.org/>
+
+=item *
+
+YAML, L<http://www.yaml.org/>
+
+=item *
+
+L<CPAN>
+
+=item *
+
+L<CPANPLUS>
+
+=item *
+
+L<ExtUtils::MakeMaker>
+
+=item *
+
+L<Module::Build>
+
+=item *
+
+L<Module::Install>
+
+=item *
+
+L<CPAN::Meta::History::Meta_1_4>
+
+=back
 
 =head1 HISTORY
 
@@ -1154,6 +1222,34 @@ process.  David and Ricardo Signes drafted the final version 2 spec
 in April 2010 based on the version 1.4 spec and patches contributed
 during the proposal process.
 
-=cut
+In 2016 cperl added the final 'c' character as perl5-incompatible
+feature to denote modernized modules with signatures and types. 'c'
+modules are accepted by cperl, but not by perl5. non-'c' modules are
+accepted by cperl and perl5.
 
-# vi:tw=72
+=head1 AUTHORS
+
+=over 4
+
+=item *
+
+David Golden <dagolden@cpan.org>
+
+=item *
+
+Ricardo Signes <rjbs@cpan.org>
+
+=item *
+
+Adam Kennedy <adamk@cpan.org>
+
+=back
+
+=head1 COPYRIGHT AND LICENSE
+
+This software is copyright (c) 2010 by David Golden, Ricardo Signes, Adam Kennedy and Contributors.
+
+This is free software; you can redistribute it and/or modify it under
+the same terms as the Perl 5 programming language system itself.
+
+=cut
